@@ -687,28 +687,30 @@ func main() {
 			logError(err)
 			return
 		}
-		log.Printf("Writing %d discovered exporters to %s", len(infos), *outFile)
-		err = ioutil.WriteFile(*outFile, m, 0644)
-		if err != nil {
-			logError(err)
-			return
-		}
 
 		if writeToS3 {
 			if *s3Bucket == "" {
 				logError(errors.New("no s3 bucket configured"))
+				return
 			}
 
 			uploader := s3manager.NewUploader(sess)
 
 			_, err = uploader.Upload(&s3manager.UploadInput{
-				Bucket: aws.String(*s3Bucket),  // Bucket to be used
-				Key:    aws.String(*outFileS3), // Name of the file to be saved
-				Body:   bytes.NewReader(m),     // File
+				Bucket: aws.String(*s3Bucket),
+				Key:    aws.String(*outFileS3),
+				Body:   bytes.NewReader(m),
 			})
 			if err != nil {
 				logError(err)
-				//return
+				return
+			}
+		} else {
+			log.Printf("Writing %d discovered exporters to %s", len(infos), *outFile)
+			err = ioutil.WriteFile(*outFile, m, 0644)
+			if err != nil {
+				logError(err)
+				return
 			}
 		}
 	}
