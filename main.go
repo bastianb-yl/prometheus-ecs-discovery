@@ -15,10 +15,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"io/ioutil"
 	"log"
 	"strconv"
@@ -55,12 +59,15 @@ const dynamicPortLabel = "PROMETHEUS_DYNAMIC_EXPORT"
 
 var cluster = flag.String("config.cluster", "", "name of the cluster to scrape")
 var outFile = flag.String("config.write-to", "ecs_file_sd.yml", "path of file to write ECS service discovery information to")
+var outFileS3 = flag.String("config.write-to-s3", "", "name of file to write ECS service discovery information to in s3")
+var s3Region = flag.String("config.s3-region", "eu-central-1", "region of the s3 bucket")
+var s3Bucket = flag.String("config.s3-bucket", "", "name of the s3 bucket")
 var interval = flag.Duration("config.scrape-interval", 60*time.Second, "interval at which to scrape the AWS API for ECS service discovery information")
 var times = flag.Int("config.scrape-times", 0, "how many times to scrape before exiting (0 = infinite)")
 var roleArn = flag.String("config.role-arn", "", "ARN of the role to assume when scraping the AWS API (optional)")
 var prometheusPortLabel = flag.String("config.port-label", "PROMETHEUS_EXPORTER_PORT", "Docker label to define the scrape port of the application (if missing an application won't be scraped)")
 var prometheusPathLabel = flag.String("config.path-label", "PROMETHEUS_EXPORTER_PATH", "Docker label to define the scrape path of the application")
-var prometheusSchemeLabel= flag.String("config.scheme-label", "PROMETHEUS_EXPORTER_SCHEME", "Docker label to define the scheme of the target application")
+var prometheusSchemeLabel = flag.String("config.scheme-label", "PROMETHEUS_EXPORTER_SCHEME", "Docker label to define the scheme of the target application")
 var prometheusFilterLabel = flag.String("config.filter-label", "", "Docker label (and optionally value) to require to scrape the application")
 var prometheusServerNameLabel = flag.String("config.server-name-label", "PROMETHEUS_EXPORTER_SERVER_NAME", "Docker label to define the server name")
 var prometheusJobNameLabel = flag.String("config.job-name-label", "PROMETHEUS_EXPORTER_JOB_NAME", "Docker label to define the job name")
@@ -77,6 +84,18 @@ func logError(err error) {
 			log.Println(err.Error())
 		}
 	}
+}
+
+func connectAWS() *session.Session {
+	sess, err := session.NewSession(
+		&aws.Config{
+			Region: aws.String(*s3Region),
+		},
+	)
+	if err != nil {
+		logError(err)
+	}
+	return sess
 }
 
 // GetClusters retrieves a list of *ClusterArns from Amazon ECS,
@@ -297,7 +316,7 @@ func (t *AugmentedTask) ExporterInformation() []*PrometheusTaskInfo {
 
 		scheme, ok = d.DockerLabels[*prometheusSchemeLabel]
 		if ok {
-		    labels.Scheme = scheme
+			labels.Scheme = scheme
 		}
 
 		ret = append(ret, &PrometheusTaskInfo{
@@ -620,6 +639,9 @@ func main() {
 	svc := ecs.NewFromConfig(config)
 	svcec2 := ec2.NewFromConfig(config)
 
+	writeToS3 := *outFileS3 != ""
+	var sess = connectAWS()
+
 	work := func() {
 		var clusters *ecs.ListClustersOutput
 
@@ -670,6 +692,24 @@ func main() {
 		if err != nil {
 			logError(err)
 			return
+		}
+
+		if writeToS3 {
+			if *s3Bucket == "" {
+				logError(errors.New("no s3 bucket configured"))
+			}
+
+			uploader := s3manager.NewUploader(sess)
+
+			_, err = uploader.Upload(&s3manager.UploadInput{
+				Bucket: aws.String(*s3Bucket),  // Bucket to be used
+				Key:    aws.String(*outFileS3), // Name of the file to be saved
+				Body:   bytes.NewReader(m),     // File
+			})
+			if err != nil {
+				logError(err)
+				//return
+			}
 		}
 	}
 	s := time.NewTimer(1 * time.Millisecond)
