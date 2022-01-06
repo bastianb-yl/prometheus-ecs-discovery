@@ -18,6 +18,10 @@ The command line parameters that can be used are:
   exiting (0 = infinite)
 * -config.write-to (string): path of file to write ECS service
   discovery information to (default "ecs_file_sd.yml")
+* -config.write-to-s3 (string): name of file to write ECS service
+  discovery information to on s3 (default "ecs_file_sd.yml")
+* -config.s3-region (string): region of the s3 bucket (default "eu-central-1")
+* -config.s3-bucket (string): name of the s3 bucket
 * -config.role-arn (string): ARN of the role to assume when scraping
   the AWS API (optional)
 * -config.server-name-label (string): Docker label to define the server name
